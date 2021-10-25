@@ -1,0 +1,5 @@
+# pretrained models are too large to be pushed
+models_pretrained/
+
+# ipython notebook
+.ipynb_checkpoints
