@@ -11,11 +11,11 @@ class GROVERFinetune(nn.Module):
         self.finetune_args = finetune_args
         self.grover_args = grover_args
         self.grover = GROVEREmbedding(grover_args)
-        self.readout = Readout(
-            rtype='self_attention',
-            hidden_size=grover_args.hidden_size,
-            attn_hidden=finetune_args.self_attn_hidden,
-            attn_out=finetune_args.self_attn_out) # readout is shared between two views of atom embedded.
+        self.readout = Readout()
+            # rtype='self_attention',
+            # hidden_size=grover_args.hidden_size,
+            # attn_hidden=finetune_args.self_attn_hidden,
+            # attn_out=finetune_args.self_attn_out) # readout is shared between two views of atom embedded.
     
         self.mol_atom_from_atom_ffn = self._create_ffn(finetune_args, grover_args)
         self.mol_atom_from_bond_ffn = self._create_ffn(finetune_args, grover_args)
@@ -23,7 +23,8 @@ class GROVERFinetune(nn.Module):
         
     def _create_ffn(self, finetune_args, grover_args):
         ffn = []
-        input_dim = grover_args.hidden_size * finetune_args.self_attn_out
+        input_dim = grover_args.hidden_size \
+            # * finetune_args.self_attn_out
         dropout = nn.Dropout(p=grover_args.dropout)
         activation = get_activation_function(finetune_args.ffn_activation)
         if finetune_args.ffn_n_layer == 1:

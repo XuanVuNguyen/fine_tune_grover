@@ -1,7 +1,11 @@
-# pretrained models are too large to be pushed
+# models are too large to be pushed
 models_pretrained/
+train_checkpoint/
 
 # ipython notebook
-.ipynb_checkpoints
+**/.ipynb_checkpoints/
+**/*.ipynb
+# pycache
+**/__pycache__/
 
 note.txt
