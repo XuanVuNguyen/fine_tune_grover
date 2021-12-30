@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+import numpy as np
 
 from typing import Union
 from collections import namedtuple, OrderedDict
@@ -26,14 +27,18 @@ def global_initiate():
 
 def initialize_model(model, 
                        pretrained_state_dict: Union[None, OrderedDict]):
-    for weight in model.parameters():
+    for layer_name, weight in model.named_parameters():
         if weight.dim() == 1:
-            nn.init.constant_(weight, 0.1)
+            if not'act_func' in layer_name and not 'norm' in layer_name:
+                nn.init.constant_(weight, 0.)
+                print(f'Zero initialization for layer: {layer_name}')
         else:
             nn.init.xavier_normal_(weight)
+            print(f'Xavier norm initialization for layer: {layer_name}')
             
     if pretrained_state_dict is not None:
         model.load_state_dict(pretrained_state_dict, strict=False)
+        print('Pretrained weight loaded')
         
 def get_pretrained_model(finetune_args, cuda):
     device = 'cuda' if cuda else 'cpu'
@@ -76,7 +81,13 @@ def get_dataset(data_args):
         csv_reader = csv.reader(file)
         next(csv_reader)
         lines = [line for line in csv_reader]
-    mol_datapoints = [MoleculeDatapoint(line) for line in lines]
+    if data_args.mol_feature_path:
+        with np.load(data_args.mol_feature_path) as feature_file:
+            features = feature_file['features']
+        assert features.shape[0] == len(lines), "Number of molecules and number of feature sets mismatch"
+        mol_datapoints = [MoleculeDatapoint(line, features=feature) for line, feature in zip(lines, features)]
+    else:
+        mol_datapoints = [MoleculeDatapoint(line) for line in lines]
     mol_dataset = MoleculeDataset(mol_datapoints)
     return mol_dataset
                

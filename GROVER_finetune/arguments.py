@@ -2,6 +2,7 @@ from collections import namedtuple
 
 DataArgs = namedtuple('DataArgs',
                        ['data_path',
+                        'mol_feature_path',
                         'scaffold_split_balanced',
                         'bond_drop_rate',
                         'no_cache'])
@@ -9,7 +10,8 @@ DataArgs = namedtuple('DataArgs',
 FinetuneArgs = namedtuple('FinetuneArgs',
                           # ['self_attn_hidden',
                           #  'self_attn_out',
-                           ['ffn_n_layer',
+                           ['append_mol_features',
+                            'ffn_n_layer',
                            'ffn_hidden',
                            'ffn_out',
                            'ffn_activation',

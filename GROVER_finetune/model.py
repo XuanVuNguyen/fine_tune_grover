@@ -1,3 +1,4 @@
+from collections import OrderedDict
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
@@ -11,7 +12,8 @@ class GROVERFinetune(nn.Module):
         self.finetune_args = finetune_args
         self.grover_args = grover_args
         self.grover = GROVEREmbedding(grover_args)
-        self.readout = Readout()
+        self.readout = Readout(rtype="mean",
+                               hidden_size=grover_args.hidden_size)
             # rtype='self_attention',
             # hidden_size=grover_args.hidden_size,
             # attn_hidden=finetune_args.self_attn_hidden,
@@ -22,48 +24,86 @@ class GROVERFinetune(nn.Module):
         self.sigmoid = nn.Sigmoid()
         
     def _create_ffn(self, finetune_args, grover_args):
-        ffn = []
-        input_dim = grover_args.hidden_size \
+        
+        input_dim = grover_args.hidden_size + finetune_args.append_mol_features*200 #dim of mol features by rdkit_2d_normalized. 
             # * finetune_args.self_attn_out
-        dropout = nn.Dropout(p=grover_args.dropout)
-        activation = get_activation_function(finetune_args.ffn_activation)
+        # dropout = nn.Dropout(p=grover_args.dropout)
+        # activation = get_activation_function(finetune_args.ffn_activation)
+        
+#         ffn = []
+#         if finetune_args.ffn_n_layer == 1:
+#             ffn.extend(
+#                 [nn.Dropout(p=grover_args.dropout),
+#                  nn.Linear(input_dim, finetune_args.ffn_out)
+#                 ]
+#             )
+#         else:
+#             ffn.extend(
+#                 [nn.Dropout(p=grover_args.dropout), # shared dropout?
+#                  nn.Linear(input_dim, finetune_args.ffn_hidden)
+#                 ]
+#             )
+
+#             for i in range(finetune_args.ffn_n_layer-2):
+#                 ffn.extend(
+#                     [get_activation_function(finetune_args.ffn_activation),
+#                      nn.Dropout(p=grover_args.dropout),
+#                      nn.Linear(finetune_args.ffn_hidden, finetune_args.ffn_hidden)
+#                     ]
+#                 )
+            
+#             ffn.extend(
+#                 [get_activation_function(finetune_args.ffn_activation),
+#                  nn.Dropout(p=grover_args.dropout),
+#                  nn.Linear(finetune_args.ffn_hidden, finetune_args.ffn_out)
+#                 ]
+#             )
+            
+        ffn = OrderedDict()
         if finetune_args.ffn_n_layer == 1:
-            ffn.extend(
-                [dropout,
-                 nn.Linear(input_dim, finetune_args.ffn_out)
-                ]
+            ffn.update(
+                {'dropout':nn.Dropout(p=grover_args.dropout),
+                 'fc':nn.Linear(input_dim, finetune_args.ffn_out)
+                }
             )
         else:
-            ffn.extend(
-                [dropout, # shared dropout?
-                 nn.Linear(input_dim, finetune_args.ffn_hidden)
-                ]
+            ffn.update(
+                {'dropout_0':nn.Dropout(p=grover_args.dropout), # shared dropout?
+                 'fc_0':nn.Linear(input_dim, finetune_args.ffn_hidden)
+                }
             )
-            for _ in range(finetune_args.ffn_n_layer-2):
-                ffn.extend(
-                    [activation,
-                     dropout,
-                     nn.Linear(finetune_args.ffn_hidden, finetune_args.ffn_hidden)
-                    ]
+            next_layer_id = 1
+            for i in range(finetune_args.ffn_n_layer-2):
+                ffn.update(
+                    {f'act_func_{i}':get_activation_function(finetune_args.ffn_activation),
+                     f'dropout_{i+1}':nn.Dropout(p=grover_args.dropout),
+                     f'fc_{i+1}':nn.Linear(finetune_args.ffn_hidden, finetune_args.ffn_hidden)
+                    }
                 )
-            ffn.extend(
-                [activation,
-                 dropout,
-                 nn.Linear(finetune_args.ffn_hidden, finetune_args.ffn_out)
-                ]
+                next_layer_id += 1
+            
+            ffn.update(
+                {f'act_func_{next_layer_id-1}':get_activation_function(finetune_args.ffn_activation),
+                 f'dropout_{next_layer_id}':nn.Dropout(p=grover_args.dropout),
+                 f'fc_{next_layer_id}':nn.Linear(finetune_args.ffn_hidden, finetune_args.ffn_out)
+                }
             )
 
-        return nn.Sequential(*ffn)
+        return nn.Sequential(ffn)
     
-    def forward(self, batch):
+    def forward(self, batch, mol_feature_batch):
         a_scope = batch[5]
         grover_output = self.grover(batch)
         mol_atom_from_atom = self.readout(grover_output['atom_from_atom'], a_scope)
         mol_atom_from_bond = self.readout(grover_output['atom_from_bond'], a_scope)
+        if self.finetune_args.append_mol_features:
+            assert mol_feature_batch is not None, "append_mol_features_batch is True but mol_feature_batch is empty."
+            mol_atom_from_atom = torch.cat([mol_atom_from_atom, mol_feature_batch], -1)
+            mol_atom_from_bond = torch.cat([mol_atom_from_bond, mol_feature_batch], -1)
         atom_ffn_output = self.mol_atom_from_atom_ffn(mol_atom_from_atom)
         bond_ffn_output = self.mol_atom_from_bond_ffn(mol_atom_from_bond)
         if self.training:
-            return atom_ffn_output, bond_ffn_output
+            return atom_ffn_output, bond_ffn_output, mol_atom_from_atom
         else:
             if self.finetune_args.classification:
                 atom_ffn_output = self.sigmoid(atom_ffn_output)

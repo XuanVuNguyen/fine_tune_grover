@@ -21,20 +21,31 @@ from grover.data.molgraph import MolCollator
 # disable rdkit warning
 RDLogger.DisableLog('rdApp.*')
 
+def unpack_batch_item(batch_item, cuda):
+    smi, batch, feature_batch, mask, target = batch_item
+    if feature_batch[0] is not None:
+        feature_batch = torch.from_numpy(np.stack(feature_batch)).float()
+        if cuda:
+            feature_batch = feature_batch.cuda()
+    else:
+        feature_batch = None
+    if cuda:
+        mask, target = mask.cuda(), target.cuda()
+    return smi, batch, feature_batch, mask, target
+    
 def train_epoch(model, epoch, total_epoch, train_loader,
                loss_fn, optimizer, lr_scheduler, cuda):
 
     model.train()
     epoch_loss = 0
     for step, batch_item in enumerate(tqdm(train_loader, desc='Epoch {}/{}'.format(epoch, total_epoch))):
-        _, batch, features_batch, mask, target = batch_item
-        if cuda:
-            mask, target = mask.cuda(), target.cuda()
+        _, batch, feature_batch, mask, target = unpack_batch_item(batch_item, cuda)
+        
         model.zero_grad()
         
-        pred = model(batch)
+        pred = model(batch, feature_batch)
         loss = loss_fn(pred, target)
-        loss = loss.sum()
+        loss = loss.sum() / mask.sum()
         epoch_loss += loss.item()
         
         loss.backward()
@@ -54,11 +65,9 @@ def evaluate(model, valid_data_loader, loss_fn, metric_fn, cuda):
         correct_pred_count = 0
     with torch.no_grad():
         for step, batch_item in enumerate(valid_data_loader):
-            _, batch, features_batch, mask, target = batch_item
-            if cuda:
-                mask, target = mask.cuda(), target.cuda()
-                # batch is send to cuda by the model internally.
-            pred = model(batch)
+            _, batch, feature_batch, mask, target = unpack_batch_item(batch_item, cuda)
+            
+            pred = model(batch, feature_batch)
             
             # if model.finetune_args.classification: # accumulate pred and target to calculate roc auc score
             all_preds.append(pred.cpu())
@@ -181,7 +190,7 @@ def test(model, evaluation_args, data_args, cuda):
     mol_collator = MolCollator({}, data_args)
     test_loader = DataLoader(
         dataset=test_dataset,
-        batch_size=32,
+        batch_size=1,
         shuffle=False,
         num_workers=2,
         collate_fn=mol_collator)
